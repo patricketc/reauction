@@ -81,6 +81,62 @@ python -m pipeline.run \
   --rate 1.0                  # seconds between requests (default 1.0)
 ```
 
+## Hosting on GitHub Pages
+
+You don't need to run your own server. Everything under `web/` is static,
+and the pipeline can run in GitHub Actions on a schedule, so the whole
+thing lives entirely on GitHub.
+
+Two workflows in `.github/workflows/` do the work:
+
+| Workflow | What it does | When it runs |
+| --- | --- | --- |
+| `update-data.yml` | Runs the Python pipeline, commits `web/properties.json` back to `main`. | Weekly (Mon 13:00 UTC) + manual |
+| `deploy-pages.yml` | Uploads `web/` as a Pages artifact and deploys it. | Push to `main` touching `web/`, after `update-data.yml` succeeds, or manual |
+
+### First-time setup
+
+1. Push this repo to GitHub.
+2. In the repo's **Settings → Pages**, set **Source** to **GitHub Actions**.
+3. In **Settings → Actions → General → Workflow permissions**, make sure
+   "Read and write permissions" is enabled (so `update-data.yml` can push
+   the refreshed `properties.json` back to `main`).
+4. Go to the **Actions** tab, pick **Update auction data**, and click
+   **Run workflow**. On the first run the per-AIN cache is empty, so expect
+   the job to take a while (1 req/sec against the assessor + TTC).
+   - Tip: for a quick smoke test, set `limit` to something small (e.g. `25`).
+5. When `update-data.yml` finishes it commits `web/properties.json` to
+   `main`, which triggers `deploy-pages.yml`. Your site will show up at
+   `https://<your-username>.github.io/reauction/`.
+
+### Refreshing the data
+
+- **Automatic:** the scheduled run re-fetches weekly. The per-AIN cache is
+  persisted across runs via `actions/cache`, so only new/changed parcels
+  hit the network.
+- **On demand:** Actions tab → *Update auction data* → *Run workflow*.
+
+### Things to tweak
+
+- **Schedule.** Edit the `cron:` in `update-data.yml`. Closer to auction
+  day you probably want it daily; off-season, monthly is plenty.
+- **PDF URL.** The workflow defaults to the 2026A book URL from the README.
+  For a new auction, either edit the default in `update-data.yml` or pass
+  a different URL when dispatching the workflow manually.
+- **Rate limit.** Stays at 1 req/sec by default. Please don't lower it —
+  these are public county services.
+
+### Known limitations on Pages
+
+- GitHub Pages only serves static files, so every browser visit reads the
+  same `properties.json` that the last pipeline run produced. The "in
+  default / redeemed" status is only as fresh as the last CI run — bump
+  the schedule (or run it manually) in the days before an auction.
+- GitHub Actions jobs have a 6-hour cap. The pipeline comfortably fits
+  under that with the cache warm, but the very first run on a fresh auction
+  book can be slow. If you hit the cap, re-running the workflow will pick up
+  from the cached rows.
+
 ## Notes & caveats
 
 - **Source structure assumptions.** The PDF parser looks for 10-digit AINs and adjacent

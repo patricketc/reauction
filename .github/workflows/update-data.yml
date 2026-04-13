@@ -1,0 +1,96 @@
+name: Update auction data
+
+# Runs the Python pipeline in GitHub Actions (so you don't have to host
+# anything yourself) and commits the refreshed web/properties.json back to
+# main. That push in turn triggers the "Deploy to GitHub Pages" workflow.
+#
+# The per-AIN JSON cache in data/cache/ is persisted across runs via
+# actions/cache, so re-runs only hit the network for new or changed parcels.
+
+on:
+  schedule:
+    # Weekly on Monday at 13:00 UTC (~6am Pacific). Adjust to taste.
+    - cron: '0 13 * * 1'
+  workflow_dispatch:
+    inputs:
+      pdf_url:
+        description: 'URL of the TTC auction book PDF'
+        required: false
+        default: 'https://ttc.lacounty.gov/wp-content/uploads/2026/03/2026A-Auction-Book.pdf'
+      limit:
+        description: 'Limit to the first N parcels (leave blank for all)'
+        required: false
+        default: ''
+      skip_default:
+        description: 'Skip TTC default-status checks (faster)'
+        type: boolean
+        default: false
+      skip_geocode:
+        description: 'Skip Nominatim geocoding'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    # Pipeline is rate-limited at 1 req/sec and the book can have thousands of
+    # parcels. Give it plenty of room but stay under the 6h job cap.
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore per-AIN cache
+        uses: actions/cache@v4
+        with:
+          path: data/cache
+          key: auction-cache-${{ github.run_id }}
+          restore-keys: |
+            auction-cache-
+
+      - name: Download auction book PDF
+        env:
+          PDF_URL: ${{ inputs.pdf_url || 'https://ttc.lacounty.gov/wp-content/uploads/2026/03/2026A-Auction-Book.pdf' }}
+        run: |
+          mkdir -p data
+          curl -fsSL --retry 3 -o data/2026A-Auction-Book.pdf "$PDF_URL"
+
+      - name: Run pipeline
+        run: |
+          args=(--pdf data/2026A-Auction-Book.pdf --out web/properties.json --rate 1.0)
+          if [ -n "${{ inputs.limit }}" ]; then
+            args+=(--limit "${{ inputs.limit }}")
+          fi
+          if [ "${{ inputs.skip_default }}" = "true" ]; then
+            args+=(--skip-default)
+          fi
+          if [ "${{ inputs.skip_geocode }}" = "true" ]; then
+            args+=(--skip-geocode)
+          fi
+          python -m pipeline.run "${args[@]}"
+
+      - name: Commit updated properties.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/properties.json
+          if git diff --cached --quiet; then
+            echo "No changes to properties.json"
+            exit 0
+          fi
+          git commit -m "Refresh auction data ($(date -u +%Y-%m-%d))"
+          git push

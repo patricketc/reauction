@@ -8,4 +8,9 @@ venv/
 # Pipeline artifacts
 data/cache/
 data/2026A-Auction-Book.pdf
-web/properties.json
+
+# web/properties.json is produced by the pipeline. It's committed from CI
+# (see .github/workflows/update-data.yml) so GitHub Pages can serve it, but
+# we don't want stale local runs to get accidentally committed. Uncomment
+# the next line if you'd rather ignore it locally:
+# web/properties.json
