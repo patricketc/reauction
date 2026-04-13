@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LA County Auction Property Tracker</title>
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin="" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <h1>LA County Auction Tracker</h1>
+      <p id="meta" class="meta">Loading…</p>
+    </div>
+    <div class="header-actions">
+      <input type="search" id="q" placeholder="Search address, AIN, zoning, use…" autocomplete="off" />
+    </div>
+  </header>
+
+  <aside id="filters">
+    <h2>Filters</h2>
+
+    <section>
+      <h3>Category</h3>
+      <div id="category-filters" class="chips"></div>
+    </section>
+
+    <section>
+      <h3>Default status</h3>
+      <div id="status-filters" class="chips"></div>
+    </section>
+
+    <section>
+      <h3>Minimum bid</h3>
+      <div class="range">
+        <label>Min <input type="number" id="bid-min" placeholder="$0" /></label>
+        <label>Max <input type="number" id="bid-max" placeholder="no limit" /></label>
+      </div>
+    </section>
+
+    <section>
+      <h3>Map</h3>
+      <label class="check">
+        <input type="checkbox" id="only-mappable" />
+        Only show rows with a location
+      </label>
+    </section>
+
+    <button id="reset" type="button">Reset all filters</button>
+  </aside>
+
+  <main id="main">
+    <div id="map"></div>
+    <div id="table-wrap">
+      <div class="table-header">
+        <span id="count">0 properties</span>
+      </div>
+      <table id="tbl">
+        <thead>
+          <tr>
+            <th data-sort="item_no">#</th>
+            <th data-sort="ain_formatted">AIN</th>
+            <th data-sort="min_bid">Min bid</th>
+            <th data-sort="situs">Address</th>
+            <th data-sort="category">Category</th>
+            <th data-sort="use_desc">Use</th>
+            <th data-sort="year_built">Year</th>
+            <th data-sort="sqft_lot">Lot sqft</th>
+            <th data-sort="default_status">Status</th>
+            <th>Links</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+          crossorigin=""></script>
+  <script src="app.js"></script>
+</body>
+</html>

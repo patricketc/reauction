@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+pipeline/__pycache__/
+.venv/
+venv/
+.DS_Store
+
+# Pipeline artifacts
+data/cache/
+data/2026A-Auction-Book.pdf
+web/properties.json
