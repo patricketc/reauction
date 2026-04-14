@@ -295,6 +295,42 @@
     applyFilters();
   });
 
+  // ------ view toggle ------------------------------------------------------
+  //
+  // The header's segmented control switches among three layouts:
+  //   - "map":  full-height map, list hidden
+  //   - "both": split view (default)
+  //   - "list": full-height list, map hidden
+  // The choice is persisted in localStorage. When we re-show the map we have
+  // to call Leaflet's ``invalidateSize`` because it lazily measures its
+  // container and will otherwise render at whatever size it had when hidden.
+
+  const VIEWS = ["map", "both", "list"];
+  const STORAGE_KEY = "reauction.view";
+  const mainEl = document.getElementById("main");
+
+  function setView(view) {
+    if (!VIEWS.includes(view)) view = "both";
+    for (const v of VIEWS) mainEl.classList.toggle(`view-${v}`, v === view);
+    document.querySelectorAll(".view-toggle button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.view === view);
+    });
+    try { localStorage.setItem(STORAGE_KEY, view); } catch (_) { /* ignore */ }
+    // Let the browser apply the layout change, then re-measure the map.
+    if (view !== "list") {
+      requestAnimationFrame(() => map.invalidateSize());
+    }
+  }
+
+  document.querySelectorAll(".view-toggle button").forEach((btn) => {
+    btn.addEventListener("click", () => setView(btn.dataset.view));
+  });
+
+  // Restore the last choice, defaulting to "both".
+  let initialView = "both";
+  try { initialView = localStorage.getItem(STORAGE_KEY) || "both"; } catch (_) { /* ignore */ }
+  setView(initialView);
+
   // ------ boot -------------------------------------------------------------
 
   (async function boot() {

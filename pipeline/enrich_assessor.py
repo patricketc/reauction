@@ -93,36 +93,65 @@ def _parse_arcgis_feature(feat: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "source": "arcgis",
-        "use_code": _pick("UseCode", "USECODE", "UseType"),
-        "use_desc": _pick("UseDescription", "USEDESCRIPTION", "UseTypeDesc"),
+        "use_code": _pick(
+            "UseCode", "USECODE", "UseType", "SpecificUseType", "GeneralUseType"
+        ),
+        "use_desc": _pick(
+            "UseDescription", "USEDESCRIPTION", "UseTypeDesc",
+            "SpecificUseDescription", "GeneralUseDescription",
+        ),
         "impr_desc": _pick(
-            "ImprovementDescription", "IMP_DESC", "BuildingClass", "BldgClass"
+            "ImprovementDescription", "IMP_DESC",
+            "BuildingClass", "BldgClass", "BuildingDescription",
         ),
-        "situs": _pick("SitusFullAddress", "SITUS_ADDR", "SitusAddress"),
-        "situs_city": _pick("SitusCity", "SITUS_CITY"),
-        "situs_zip": _pick("SitusZIP", "SITUS_ZIP", "SitusZip"),
+        "situs": _pick(
+            "SitusFullAddress", "SITUS_ADDR", "SitusAddress",
+            "SitusStreetAddress", "SitusHouseNoStreet",
+        ),
+        "situs_city": _pick("SitusCity", "SITUS_CITY", "SitusCityState"),
+        "situs_zip": _pick("SitusZIP", "SITUS_ZIP", "SitusZip", "SitusZipCode"),
         "year_built": _pick(
-            "YearBuilt", "YEARBUILT", "EffectiveYearBuilt", "EFF_YEAR_BUILT"
+            "YearBuilt", "YEARBUILT",
+            "EffectiveYearBuilt", "EFF_YEAR_BUILT", "YearBuiltEffective",
         ),
-        "bedrooms": _pick("Bedrooms", "BEDROOMS", "Bedrooms1", "BedroomCount"),
+        "bedrooms": _pick(
+            "Bedrooms", "BEDROOMS", "Bedrooms1", "BedroomCount", "BedCount"
+        ),
         "bathrooms": _pick(
-            "Bathrooms", "BATHROOMS", "Bathrooms1", "BathroomCount"
+            "Bathrooms", "BATHROOMS", "Bathrooms1",
+            "BathroomCount", "BathCount", "Baths",
         ),
-        "units": _pick("Units", "UNITS", "UnitsCount", "NumUnits"),
-        "sqft_lot": _pick("SQFTmain", "LandSqFt", "LAND_SQFT", "LotSqFt"),
+        "units": _pick(
+            "Units", "UNITS", "UnitsCount", "NumUnits", "NumberOfUnits"
+        ),
+        # sqft_lot: LA County's parcel feature services store geometry in a
+        # projected CRS (CA State Plane Zone 5, units = US feet), so the
+        # server-computed ``Shape__Area`` attribute is lot area in square
+        # feet -- ideal when no dedicated LandSqFt column is exposed.
+        "sqft_lot": _pick(
+            "LandSqFt", "LandSqft", "LAND_SQFT", "LotSqFt", "LotSqft",
+            "SQFT_LOT", "LandArea", "LandAreaSqFt", "LAND_AREA",
+            "ParcelAreaSqFt", "Shape__Area", "Shape_Area", "SHAPE_Area",
+        ),
+        # sqft_building: SQFTmain is the LA County Assessor canonical field
+        # for the main structure's square footage.
         "sqft_building": _pick(
-            "Bldg1SqFt", "BLDG_SQFT", "SQFTBldg", "BuildingSqFt"
+            "SQFTmain", "SqFtMain", "SQFT_MAIN",
+            "Bldg1SqFt", "BLDG_SQFT", "SQFTBldg", "BuildingSqFt", "MainSqFt",
         ),
         "assessed_land": _pick("Roll_LandValue", "LandValue", "LAND_VALUE"),
         "assessed_improvements": _pick(
             "Roll_ImpValue", "ImprovementValue", "IMP_VALUE"
         ),
         "assessed_total": _pick(
-            "Roll_TotalValue", "TotalValue", "NetTaxableValue", "NetTaxValue"
+            "Roll_TotalValue", "TotalValue", "NetTaxableValue",
+            "NetTaxValue", "TotalLandImpAV",
         ),
-        "zoning": _pick("Zoning", "ZONING"),
+        "zoning": _pick("Zoning", "ZONING", "ZoneCode"),
         "tax_rate_area": _pick("TaxRateArea", "TRA", "TaxRateCity"),
-        "last_sale_date": _pick("SaleDate", "LastSaleDate", "SALE_DATE"),
+        "last_sale_date": _pick(
+            "SaleDate", "LastSaleDate", "SALE_DATE", "RecordingDate"
+        ),
         "last_sale_price": _pick(
             "SaleAmount", "SalePrice", "LastSalePrice", "SALE_PRICE"
         ),
@@ -248,7 +277,7 @@ class AssessorEnricher:
         self.session = make_session()
 
     def lookup(self, ain: str) -> dict[str, Any] | None:
-        cached = self.cache.get(f"assessor_{ain}")
+        cached = self.cache.get(f"assessor_v2_{ain}")
         if cached is not None:
             # Older cache entries may have stored {"source": "none"} when every
             # endpoint failed. Re-try those so a URL fix takes effect without
@@ -264,5 +293,5 @@ class AssessorEnricher:
 
         # Cache even the "nothing found" result so we don't hammer on retry
         # within a single run.
-        self.cache.set(f"assessor_{ain}", result or {"source": "none"})
+        self.cache.set(f"assessor_v2_{ain}", result or {"source": "none"})
         return result
