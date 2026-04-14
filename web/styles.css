@@ -235,9 +235,30 @@ main#main {
 .leaflet-popup-content {
   font-size: 13px;
   line-height: 1.4;
+  min-width: 220px;
 }
 .leaflet-popup-content strong { display: block; margin-bottom: 4px; }
 .leaflet-popup-content a { color: var(--accent); text-decoration: none; }
+
+.popup-details {
+  margin: 6px 0 8px;
+  padding: 6px 8px;
+  background: #f7f8fb;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.popup-details > div {
+  display: flex;
+  gap: 8px;
+  padding: 1px 0;
+}
+.popup-details > div > span {
+  flex: 0 0 96px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
 
 @media (max-width: 900px) {
   body {

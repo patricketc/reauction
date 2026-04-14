@@ -50,15 +50,57 @@
   function popupHtml(p) {
     const bid = p.min_bid != null ? `$${p.min_bid.toLocaleString()}` : "—";
     const status = p.default_status || "unknown";
+
+    // Build the "details" block out of whichever assessor fields we have.
+    // Each entry is a [label, value] pair; entries with an empty value are
+    // dropped so we don't show a grid full of em-dashes for sparse parcels.
+    const details = [
+      ["Use", p.use_desc || p.use_code],
+      ["Building", p.impr_desc],
+      ["Year", p.year_built],
+      ["Beds / Baths", bedsBathsLabel(p)],
+      ["Units", p.units],
+      ["Lot sqft", fmtNum(p.sqft_lot)],
+      ["Bldg sqft", fmtNum(p.sqft_building)],
+      ["Zoning", p.zoning],
+      ["Assessed (total)", p.assessed_total != null ? fmtMoney(p.assessed_total) : null],
+      ["Last sale", lastSaleLabel(p)],
+    ].filter(([, v]) => v != null && v !== "" && v !== "—");
+
+    const detailHtml = details.length
+      ? `<div class="popup-details">${details
+          .map(([k, v]) => `<div><span>${escapeHtml(k)}</span>${escapeHtml(v)}</div>`)
+          .join("")}</div>`
+      : "";
+
     return `
       <strong>${escapeHtml(p.situs || p.ain_formatted || "Parcel")}</strong>
       AIN ${escapeHtml(p.ain_formatted || p.ain)}<br>
       Min bid: ${bid}<br>
-      ${escapeHtml(p.category || "")} <span class="badge ${status}">${status}</span><br>
+      ${escapeHtml(p.category || "")} <span class="badge ${status}">${status}</span>
+      ${detailHtml}
       <a href="${escapeHtml(p.assessor_url)}" target="_blank" rel="noopener">Assessor</a>
       &nbsp;·&nbsp;
       <a href="${escapeHtml(p.ttc_url)}" target="_blank" rel="noopener">TTC</a>
     `;
+  }
+
+  function bedsBathsLabel(p) {
+    // Only show the combined "3 / 2" if we have at least one side.
+    if (p.bedrooms == null && p.bathrooms == null) return null;
+    return `${p.bedrooms ?? "—"} / ${p.bathrooms ?? "—"}`;
+  }
+
+  function lastSaleLabel(p) {
+    if (!p.last_sale_date && p.last_sale_price == null) return null;
+    const price = p.last_sale_price != null ? fmtMoney(p.last_sale_price) : "—";
+    // ArcGIS serializes dates as epoch-milliseconds integers; if we get a
+    // number, format it; otherwise show the string we got.
+    let date = p.last_sale_date ?? "—";
+    if (typeof date === "number") {
+      try { date = new Date(date).toLocaleDateString(); } catch (_) { /* leave as number */ }
+    }
+    return `${price} on ${date}`;
   }
 
   function rebuildMarkers() {
