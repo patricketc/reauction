@@ -64,25 +64,22 @@ def _ain_variants(ain: str) -> tuple[str, ...]:
 
 
 def _classify(html: str, ain: str) -> str:
-    """Return one of: 'in_default', 'redeemed', 'unknown'.
+    """Return one of: ``'in_default'``, ``'redeemed'``, ``'unknown'``.
 
-    Returns ``unknown`` unless the response clearly corresponds to the
-    requested AIN *and* contains a per-parcel status phrase.
+    Every parcel listed in the TTC auction book is in default at publication
+    time -- that's how it ended up in the book. The vcheck lookup is only
+    interesting when it tells us a *redemption* happened between publication
+    and today. So the default answer here is ``in_default``, and we only
+    override it when the response is clearly about this specific AIN and
+    contains a redemption signal.
+
+    ``unknown`` is reserved for genuine lookup failures (no HTML at all), and
+    is returned at the caller rather than from this function.
     """
     text = BeautifulSoup(html, "lxml").get_text(" ", strip=True)
-
-    # If the AIN we looked up isn't anywhere in the response, we almost
-    # certainly got the generic landing/error page. Don't infer status from it.
-    if not any(v in text for v in _ain_variants(ain)):
-        return "unknown"
-
-    # "Redeemed" wins over "in default" if both match -- redemption is a
-    # terminal state that overrides the default listing.
-    if _REDEEMED_RE.search(text):
+    if any(v in text for v in _ain_variants(ain)) and _REDEEMED_RE.search(text):
         return "redeemed"
-    if _DEFAULT_RE.search(text):
-        return "in_default"
-    return "unknown"
+    return "in_default"
 
 
 class DefaultChecker:
@@ -106,13 +103,21 @@ class DefaultChecker:
         return None
 
     def check(self, ain: str) -> dict[str, Any]:
-        key = f"default_{ain}"
+        # Cache key is versioned ("_v2") because the classification contract
+        # changed in April 2026: we now default to ``in_default`` instead of
+        # ``unknown``. Old ``default_{ain}`` entries that persisted a stale
+        # "unknown for everyone" result would otherwise mask the new logic.
+        key = f"default_v2_{ain}"
         cached = self.cache.get(key)
         if cached is not None:
             return cached
 
         html = self._fetch(ain)
-        status = _classify(html, ain) if html else "unknown"
-        result = {"status": status, "source": "vcheck"}
+        if html is None:
+            # Every known endpoint was unreachable. Don't cache this -- we
+            # want to re-try on the next run rather than lock in ``unknown``.
+            return {"status": "unknown", "source": "unreachable"}
+
+        result = {"status": _classify(html, ain), "source": "vcheck"}
         self.cache.set(key, result)
         return result

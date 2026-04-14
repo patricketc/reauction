@@ -18,6 +18,11 @@
     </div>
     <div class="header-actions">
       <input type="search" id="q" placeholder="Search address, AIN, zoning, use…" autocomplete="off" />
+      <div class="view-toggle" role="tablist" aria-label="Layout">
+        <button type="button" data-view="map" title="Map only" aria-label="Map only">Map</button>
+        <button type="button" data-view="both" class="active" title="Map and list" aria-label="Map and list">Both</button>
+        <button type="button" data-view="list" title="List only" aria-label="List only">List</button>
+      </div>
     </div>
   </header>
 
@@ -59,23 +64,25 @@
       <div class="table-header">
         <span id="count">0 properties</span>
       </div>
-      <table id="tbl">
-        <thead>
-          <tr>
-            <th data-sort="item_no">#</th>
-            <th data-sort="ain_formatted">AIN</th>
-            <th data-sort="min_bid">Min bid</th>
-            <th data-sort="situs">Address</th>
-            <th data-sort="category">Category</th>
-            <th data-sort="use_desc">Use</th>
-            <th data-sort="year_built">Year</th>
-            <th data-sort="sqft_lot">Lot sqft</th>
-            <th data-sort="default_status">Status</th>
-            <th>Links</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+      <div id="table-scroll">
+        <table id="tbl">
+          <thead>
+            <tr>
+              <th data-sort="item_no">#</th>
+              <th data-sort="ain_formatted">AIN</th>
+              <th data-sort="min_bid">Min bid</th>
+              <th data-sort="situs">Address</th>
+              <th data-sort="category">Category</th>
+              <th data-sort="use_desc">Use</th>
+              <th data-sort="year_built">Year</th>
+              <th data-sort="sqft_lot">Lot sqft</th>
+              <th data-sort="default_status">Status</th>
+              <th>Links</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
   </main>
 
