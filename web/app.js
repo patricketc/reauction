@@ -11,16 +11,35 @@
     all: [],            // full dataset, never mutated after load
     filtered: [],       // current filtered + sorted view
     categories: [],     // discovered category names
-    statuses: [],       // discovered default-status values
+    statuses: [],       // discovered effective-status values (Assessor tax_status preferred)
     activeCategories: new Set(),
     activeStatuses: new Set(),
     query: "",
     bidMin: null,
     bidMax: null,
     onlyMappable: false,
+    onlyLiens: false,
+    onlySpecial: false,
     sort: { key: "min_bid", dir: "asc" },
     selectedAin: null,
   };
+
+  // Effective status prefers the Assessor portal's tax-status label (which we
+  // scrape for each parcel) over the TTC vcheck "default_status" heuristic.
+  // Falls back to default_status if tax_status is missing.
+  function effectiveStatus(p) {
+    return p.tax_status || p.default_status || "unknown";
+  }
+
+  // CSS-safe class name derived from an effective-status label, so "Tax
+  // Defaulted" -> "status-tax-defaulted". Keeps the badge palette driven by
+  // status text instead of a fixed enum.
+  function statusClass(label) {
+    return "status-" + String(label || "unknown")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
 
   // ------ data loading -----------------------------------------------------
 
@@ -49,7 +68,8 @@
 
   function popupHtml(p) {
     const bid = p.min_bid != null ? `$${p.min_bid.toLocaleString()}` : "—";
-    const status = p.default_status || "unknown";
+    const status = effectiveStatus(p);
+    const sClass = statusClass(status);
 
     // Build the "details" block out of whichever assessor fields we have.
     // Each entry is a [label, value] pair; entries with an empty value are
@@ -73,12 +93,32 @@
           .join("")}</div>`
       : "";
 
+    // Flag blocks: special conditions and city liens. Each only renders when
+    // the parcel actually has the data, so clean parcels stay compact.
+    const specials = Array.isArray(p.special_conditions) ? p.special_conditions : [];
+    const specialHtml = specials.length
+      ? `<div class="popup-flags popup-flags-special"><strong>Special conditions</strong>
+           <ul>${specials.map((c) => `<li>${escapeHtml(c)}</li>`).join("")}</ul></div>`
+      : "";
+
+    const liens = Array.isArray(p.liens) ? p.liens : [];
+    const lienHtml = liens.length
+      ? `<div class="popup-flags popup-flags-liens">
+           <strong>City liens · total ${fmtMoney(p.lien_total)}</strong>
+           <ul>${liens.slice(0, 6).map((l) =>
+             `<li>${escapeHtml(l.desc || "Lien")} — ${fmtMoney(l.amount)}</li>`
+           ).join("")}${liens.length > 6 ? `<li>+ ${liens.length - 6} more</li>` : ""}</ul>
+         </div>`
+      : "";
+
     return `
       <strong>${escapeHtml(p.situs || p.ain_formatted || "Parcel")}</strong>
       AIN ${escapeHtml(p.ain_formatted || p.ain)}<br>
       Min bid: ${bid}<br>
-      ${escapeHtml(p.category || "")} <span class="badge ${status}">${status}</span>
+      ${escapeHtml(p.category || "")} <span class="badge ${sClass}">${escapeHtml(status)}</span>
       ${detailHtml}
+      ${specialHtml}
+      ${lienHtml}
       <a href="${escapeHtml(p.assessor_url)}" target="_blank" rel="noopener">Assessor</a>
       &nbsp;·&nbsp;
       <a href="${escapeHtml(p.ttc_url)}" target="_blank" rel="noopener">TTC</a>
@@ -141,9 +181,32 @@
     }[c]));
   }
 
+  function flagsCellHtml(p) {
+    const parts = [];
+    const scCount = Array.isArray(p.special_conditions) ? p.special_conditions.length : 0;
+    if (scCount > 0) {
+      const tip = p.special_conditions.join("; ");
+      parts.push(
+        `<span class="flag flag-special" title="${escapeHtml(tip)}">SC${scCount > 1 ? ` ×${scCount}` : ""}</span>`
+      );
+    }
+    const lienTotal = Number(p.lien_total) || 0;
+    const lienCount = Array.isArray(p.liens) ? p.liens.length : 0;
+    if (lienTotal > 0 || lienCount > 0) {
+      const tip = lienCount
+        ? `${lienCount} lien${lienCount === 1 ? "" : "s"} totaling ${fmtMoney(lienTotal)}`
+        : fmtMoney(lienTotal);
+      parts.push(
+        `<span class="flag flag-lien" title="${escapeHtml(tip)}">Lien ${fmtMoney(lienTotal)}</span>`
+      );
+    }
+    return parts.join(" ");
+  }
+
   function renderTable() {
     const rows = state.filtered.map((p) => {
-      const status = p.default_status || "unknown";
+      const status = effectiveStatus(p);
+      const sClass = statusClass(status);
       return `
         <tr data-ain="${escapeHtml(p.ain)}" class="${state.selectedAin === p.ain ? "selected" : ""}">
           <td>${escapeHtml(p.item_no || "")}</td>
@@ -154,7 +217,8 @@
           <td>${escapeHtml(p.use_desc || p.use_code || "")}</td>
           <td>${escapeHtml(p.year_built || "")}</td>
           <td>${fmtNum(p.sqft_lot)}</td>
-          <td><span class="badge ${status}">${status}</span></td>
+          <td><span class="badge ${sClass}">${escapeHtml(status)}</span></td>
+          <td class="flags-cell">${flagsCellHtml(p)}</td>
           <td>
             <a href="${escapeHtml(p.assessor_url)}" target="_blank" rel="noopener">Assr</a>
             · <a href="${escapeHtml(p.ttc_url)}" target="_blank" rel="noopener">TTC</a>
@@ -207,11 +271,18 @@
     });
   });
 
+  // Derived sort values — handles columns (like "Status") that don't map to a
+  // single raw field on the property record.
+  function sortValue(p, key) {
+    if (key === "status_effective") return effectiveStatus(p);
+    return p[key];
+  }
+
   function sortRows(rows) {
     const { key, dir } = state.sort;
     const sign = dir === "asc" ? 1 : -1;
     return rows.slice().sort((a, b) => {
-      const av = a[key], bv = b[key];
+      const av = sortValue(a, key), bv = sortValue(b, key);
       if (av == null && bv == null) return 0;
       if (av == null) return 1;   // nulls always last
       if (bv == null) return -1;
@@ -226,14 +297,17 @@
     const q = state.query.trim().toLowerCase();
     const filtered = state.all.filter((p) => {
       if (state.activeCategories.size && !state.activeCategories.has(p.category || "Unknown")) return false;
-      if (state.activeStatuses.size && !state.activeStatuses.has(p.default_status || "unknown")) return false;
+      if (state.activeStatuses.size && !state.activeStatuses.has(effectiveStatus(p))) return false;
       if (state.bidMin != null && (p.min_bid == null || p.min_bid < state.bidMin)) return false;
       if (state.bidMax != null && (p.min_bid == null || p.min_bid > state.bidMax)) return false;
       if (state.onlyMappable && (p.lat == null || p.lng == null)) return false;
+      if (state.onlyLiens && !(Number(p.lien_total) > 0 || (p.liens && p.liens.length))) return false;
+      if (state.onlySpecial && !(p.special_conditions && p.special_conditions.length)) return false;
       if (q) {
         const hay = [
           p.ain, p.ain_formatted, p.situs, p.use_desc, p.use_code,
           p.category, p.zoning, p.item_no,
+          ...(p.special_conditions || []),
         ].map((x) => String(x ?? "").toLowerCase()).join(" ");
         if (!hay.includes(q)) return false;
       }
@@ -279,6 +353,14 @@
     state.onlyMappable = e.target.checked;
     applyFilters();
   });
+  document.getElementById("only-liens").addEventListener("change", (e) => {
+    state.onlyLiens = e.target.checked;
+    applyFilters();
+  });
+  document.getElementById("only-special").addEventListener("change", (e) => {
+    state.onlySpecial = e.target.checked;
+    applyFilters();
+  });
   document.getElementById("reset").addEventListener("click", () => {
     state.activeCategories.clear();
     state.activeStatuses.clear();
@@ -286,10 +368,14 @@
     state.bidMin = null;
     state.bidMax = null;
     state.onlyMappable = false;
+    state.onlyLiens = false;
+    state.onlySpecial = false;
     document.getElementById("q").value = "";
     document.getElementById("bid-min").value = "";
     document.getElementById("bid-max").value = "";
     document.getElementById("only-mappable").checked = false;
+    document.getElementById("only-liens").checked = false;
+    document.getElementById("only-special").checked = false;
     renderChips("category-filters", state.categories, state.activeCategories);
     renderChips("status-filters", state.statuses, state.activeStatuses);
     applyFilters();
@@ -343,7 +429,7 @@
       const statuses = new Set();
       for (const p of state.all) {
         cats.add(p.category || "Unknown");
-        statuses.add(p.default_status || "unknown");
+        statuses.add(effectiveStatus(p));
       }
       state.categories = [...cats].sort();
       state.statuses = [...statuses].sort();
