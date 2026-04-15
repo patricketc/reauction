@@ -17,6 +17,14 @@ on:
         description: 'URL of the TTC auction book PDF'
         required: false
         default: 'https://ttc.lacounty.gov/wp-content/uploads/2026/03/2026A-Auction-Book.pdf'
+      special_conditions_url:
+        description: 'URL of the TTC Special Conditions flyer PDF (optional)'
+        required: false
+        default: 'https://ttc.lacounty.gov/wp-content/uploads/2026/03/2026A-Special-Conditions-Flyer.pdf'
+      city_liens_url:
+        description: 'URL of the City of LA TTC liens PDF (optional)'
+        required: false
+        default: 'https://ttc.lacounty.gov/wp-content/uploads/2026/03/CITY-OF-LOS-ANGELES-TTC-2026A.pdf'
       limit:
         description: 'Limit to the first N parcels (leave blank for all)'
         required: false
@@ -69,9 +77,37 @@ jobs:
           mkdir -p data
           curl -fsSL --retry 3 -o data/2026A-Auction-Book.pdf "$PDF_URL"
 
+      - name: Download special-conditions flyer PDF
+        # Failures here are non-fatal: the pipeline treats missing flyers as
+        # empty enrichment rather than aborting the whole run.
+        env:
+          SC_URL: ${{ inputs.special_conditions_url || 'https://ttc.lacounty.gov/wp-content/uploads/2026/03/2026A-Special-Conditions-Flyer.pdf' }}
+        run: |
+          mkdir -p data
+          if [ -n "$SC_URL" ]; then
+            curl -fsSL --retry 3 -o data/special-conditions.pdf "$SC_URL" || \
+              echo "::warning::Failed to fetch special-conditions PDF from $SC_URL"
+          fi
+
+      - name: Download City of LA liens PDF
+        env:
+          LIENS_URL: ${{ inputs.city_liens_url || 'https://ttc.lacounty.gov/wp-content/uploads/2026/03/CITY-OF-LOS-ANGELES-TTC-2026A.pdf' }}
+        run: |
+          mkdir -p data
+          if [ -n "$LIENS_URL" ]; then
+            curl -fsSL --retry 3 -o data/city-liens.pdf "$LIENS_URL" || \
+              echo "::warning::Failed to fetch city-liens PDF from $LIENS_URL"
+          fi
+
       - name: Run pipeline
         run: |
           args=(--pdf data/2026A-Auction-Book.pdf --out web/properties.json --rate 1.0)
+          if [ -f data/special-conditions.pdf ]; then
+            args+=(--special-conditions-pdf data/special-conditions.pdf)
+          fi
+          if [ -f data/city-liens.pdf ]; then
+            args+=(--city-liens-pdf data/city-liens.pdf)
+          fi
           if [ -n "${{ inputs.limit }}" ]; then
             args+=(--limit "${{ inputs.limit }}")
           fi

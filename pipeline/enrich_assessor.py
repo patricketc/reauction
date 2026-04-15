@@ -207,6 +207,51 @@ def _arcgis_lookup(session, ain: str) -> dict[str, Any] | None:
 _USE_RE = re.compile(r"use\s*code[^0-9A-Z]*([0-9A-Z]{3,4})", re.I)
 _DESC_RE = re.compile(r"use\s*description[^:]*:\s*([^\n<]+)", re.I)
 
+# Tax-status indicators on the Assessor parcel detail page. Order matters:
+# more-specific phrases come first so they win over generic words like
+# "delinquent". Values are normalized labels, not direct page strings, so
+# the UI has a small fixed vocabulary to switch on.
+_TAX_STATUS_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\btax[-\s]?defaulted\b", re.I), "Tax Defaulted"),
+    (re.compile(r"\bsubject to (the )?power to sell\b", re.I), "Subject to Power to Sell"),
+    (re.compile(r"\bno longer subject to (the )?power to sell\b", re.I), "Redeemed"),
+    (re.compile(r"\b(has been )?redeemed\b", re.I), "Redeemed"),
+    (re.compile(r"\bpaid in full\b", re.I), "Paid in Full"),
+    (re.compile(r"\btaxes?\s+(?:are\s+)?current\b", re.I), "Current"),
+    (re.compile(r"\bdelinquent\b", re.I), "Delinquent"),
+)
+
+
+def _scrape_tax_status(session, ain: str) -> str | None:
+    """Return a normalized tax-status label from the Assessor portal, or None.
+
+    The Assessor parcel detail page surfaces tax status as plain text. We
+    require the AIN to appear somewhere in the page body first -- a generic
+    error/landing page might still contain the word "defaulted" in boilerplate,
+    and we don't want to match on that.
+    """
+    url = PARCEL_DETAIL_URL.format(ain=ain)
+    try:
+        resp = session.get(url, timeout=20)
+    except Exception as e:  # noqa: BLE001
+        log.debug("tax-status fetch failed for %s: %s", ain, e)
+        return None
+    if not resp.ok or not resp.text:
+        return None
+
+    text = BeautifulSoup(resp.text, "lxml").get_text(" ", strip=True)
+
+    ain_variants = (ain,) if len(ain) != 10 else (
+        ain, f"{ain[:4]}-{ain[4:7]}-{ain[7:]}", f"{ain[:4]} {ain[4:7]} {ain[7:]}"
+    )
+    if not any(v in text for v in ain_variants):
+        return None
+
+    for pattern, label in _TAX_STATUS_RULES:
+        if pattern.search(text):
+            return label
+    return None
+
 
 def _html_lookup(session, ain: str) -> dict[str, Any] | None:
     url = PARCEL_DETAIL_URL.format(ain=ain)
@@ -277,21 +322,41 @@ class AssessorEnricher:
         self.session = make_session()
 
     def lookup(self, ain: str) -> dict[str, Any] | None:
+        # Structured data path: ArcGIS first, HTML fallback. Cached as a unit.
         cached = self.cache.get(f"assessor_v2_{ain}")
-        if cached is not None:
-            # Older cache entries may have stored {"source": "none"} when every
-            # endpoint failed. Re-try those so a URL fix takes effect without
-            # manually clearing the cache.
-            if cached.get("source") != "none":
-                return cached
-
-        self.rate.wait()
-        result = _arcgis_lookup(self.session, ain)
-        if result is None:
+        if cached is not None and cached.get("source") != "none":
+            result: dict[str, Any] | None = cached
+        else:
             self.rate.wait()
-            result = _html_lookup(self.session, ain)
+            result = _arcgis_lookup(self.session, ain)
+            if result is None:
+                self.rate.wait()
+                result = _html_lookup(self.session, ain)
+            # Cache even the "nothing found" result so we don't hammer on
+            # retry within a single run.
+            self.cache.set(f"assessor_v2_{ain}", result or {"source": "none"})
 
-        # Cache even the "nothing found" result so we don't hammer on retry
-        # within a single run.
-        self.cache.set(f"assessor_v2_{ain}", result or {"source": "none"})
-        return result
+        # Tax status: always from the Assessor parcel page, separately cached
+        # so it can be invalidated without dropping the structured data, and
+        # so a successful ArcGIS lookup doesn't skip it.
+        tax_status = self._lookup_tax_status(ain)
+
+        if result is None:
+            result = {}
+        if tax_status:
+            result["tax_status"] = tax_status
+        return result or None
+
+    def _lookup_tax_status(self, ain: str) -> str | None:
+        key = f"tax_status_v1_{ain}"
+        cached = self.cache.get(key)
+        if cached is not None:
+            # Re-try a miss on the next run in case the portal was flaky,
+            # rather than locking in ``None`` forever.
+            if cached.get("tax_status") is not None:
+                return cached["tax_status"]
+            return None
+        self.rate.wait()
+        status = _scrape_tax_status(self.session, ain)
+        self.cache.set(key, {"tax_status": status})
+        return status

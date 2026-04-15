@@ -265,12 +265,58 @@ main#main.view-list > #map { display: none; }
   padding: 2px 7px;
   border-radius: 999px;
   font-weight: 600;
-  text-transform: lowercase;
 }
-.badge.in_default { background: #fde5e5; color: var(--danger); }
-.badge.redeemed   { background: #e1f2e6; color: var(--ok); }
-.badge.unknown    { background: #f5efd8; color: var(--warn); }
-.badge.skipped    { background: #eceff4; color: var(--muted); }
+
+/* Badge palette by status. New labels (from the Assessor parcel page) get a
+   class via `statusClass()` in app.js, e.g. "Tax Defaulted" -> status-tax-defaulted. */
+.badge.status-tax-defaulted,
+.badge.status-subject-to-power-to-sell,
+.badge.status-delinquent,
+.badge.status-in-default,
+.badge.status-in_default { background: #fde5e5; color: var(--danger); }
+
+.badge.status-redeemed,
+.badge.status-paid-in-full,
+.badge.status-current { background: #e1f2e6; color: var(--ok); }
+
+.badge.status-unknown { background: #f5efd8; color: var(--warn); }
+.badge.status-skipped { background: #eceff4; color: var(--muted); }
+
+/* Fallback for any status label we haven't added a palette entry for. */
+.badge { background: #eceff4; color: var(--muted); }
+
+/* Per-row flag chips (Flags column). */
+.flags-cell { white-space: nowrap; }
+.flag {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-weight: 600;
+  margin-right: 4px;
+  cursor: help;
+}
+.flag-lien    { background: #fde5e5; color: var(--danger); }
+.flag-special { background: #fff0d6; color: var(--warn); }
+
+/* Flag detail blocks inside map popups. */
+.popup-flags {
+  margin: 6px 0 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.popup-flags strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.popup-flags ul { list-style: none; margin: 0; padding: 0; }
+.popup-flags li { padding: 1px 0; }
+.popup-flags-liens   { background: #fde5e5; color: var(--danger); }
+.popup-flags-special { background: #fff0d6; color: var(--warn); }
 
 #tbl a { color: var(--accent); text-decoration: none; }
 #tbl a:hover { text-decoration: underline; }

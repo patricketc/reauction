@@ -35,8 +35,20 @@
     </section>
 
     <section>
-      <h3>Default status</h3>
+      <h3>Tax status</h3>
       <div id="status-filters" class="chips"></div>
+    </section>
+
+    <section>
+      <h3>Flags</h3>
+      <label class="check">
+        <input type="checkbox" id="only-liens" />
+        Only with city liens
+      </label>
+      <label class="check">
+        <input type="checkbox" id="only-special" />
+        Only with special conditions
+      </label>
     </section>
 
     <section>
@@ -76,7 +88,8 @@
               <th data-sort="use_desc">Use</th>
               <th data-sort="year_built">Year</th>
               <th data-sort="sqft_lot">Lot sqft</th>
-              <th data-sort="default_status">Status</th>
+              <th data-sort="status_effective">Status</th>
+              <th data-sort="lien_total">Flags</th>
               <th>Links</th>
             </tr>
           </thead>
