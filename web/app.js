@@ -12,8 +12,13 @@
     filtered: [],       // current filtered + sorted view
     categories: [],     // discovered category names
     statuses: [],       // discovered effective-status values (Assessor tax_status preferred)
+    useCodes: [],       // discovered use-code values, with counts
+    lienTypes: [],      // discovered lien-type keys (irs/weed/brush/special)
     activeCategories: new Set(),
     activeStatuses: new Set(),
+    activeUseCodes: new Set(),
+    activeLienTypes: new Set(),
+    useCodeQuery: "",   // text filter over the use-code chip list itself
     query: "",
     bidMin: null,
     bidMax: null,
@@ -26,9 +31,21 @@
 
   // Effective status prefers the Assessor portal's tax-status label (which we
   // scrape for each parcel) over the TTC vcheck "default_status" heuristic.
-  // Falls back to default_status if tax_status is missing.
+  // The two sources use different vocabularies, so normalize the TTC fallback
+  // to the same labels the Assessor scrape produces. That way "Tax Defaulted"
+  // from one source and "in_default" from the other collapse into one filter
+  // chip rather than two.
+  const DEFAULT_STATUS_LABELS = {
+    in_default: "Tax Defaulted",
+    redeemed: "Redeemed",
+    unknown: "Unknown",
+    skipped: "Unknown",
+  };
   function effectiveStatus(p) {
-    return p.tax_status || p.default_status || "unknown";
+    if (p.tax_status) return p.tax_status;
+    const d = p.default_status;
+    if (d) return DEFAULT_STATUS_LABELS[d] || d;
+    return "Unknown";
   }
 
   // CSS-safe class name derived from an effective-status label, so "Tax
@@ -105,9 +122,10 @@
     const lienHtml = liens.length
       ? `<div class="popup-flags popup-flags-liens">
            <strong>City liens · total ${fmtMoney(p.lien_total)}</strong>
-           <ul>${liens.slice(0, 6).map((l) =>
-             `<li>${escapeHtml(l.desc || "Lien")} — ${fmtMoney(l.amount)}</li>`
-           ).join("")}${liens.length > 6 ? `<li>+ ${liens.length - 6} more</li>` : ""}</ul>
+           <ul>${liens.slice(0, 6).map((l) => {
+             const type = l && l.lien_type_label ? ` [${escapeHtml(l.lien_type_label)}]` : "";
+             return `<li>${escapeHtml(l.desc || "Lien")}${type} — ${fmtMoney(l.amount)}</li>`;
+           }).join("")}${liens.length > 6 ? `<li>+ ${liens.length - 6} more</li>` : ""}</ul>
          </div>`
       : "";
 
@@ -181,23 +199,54 @@
     }[c]));
   }
 
+  // Which lien/SC types get their own pill in the row flags. Kept short so
+  // the flags column stays readable; anything else collapses into a generic
+  // "Lien <total>" chip.
+  const TYPE_FLAG_META = {
+    irs:          { css: "flag-irs",          short: "IRS" },
+    weed:         { css: "flag-weed",         short: "Weed" },
+    brush:        { css: "flag-brush",        short: "Brush" },
+    state_tax:    { css: "flag-irs",          short: "State Tax" },
+  };
+
   function flagsCellHtml(p) {
     const parts = [];
-    const scCount = Array.isArray(p.special_conditions) ? p.special_conditions.length : 0;
-    if (scCount > 0) {
-      const tip = p.special_conditions.join("; ");
+    const lienTotal = Number(p.lien_total) || 0;
+    const liens = Array.isArray(p.liens) ? p.liens : [];
+    const totalsByType = (p.lien_totals_by_type && typeof p.lien_totals_by_type === "object")
+      ? p.lien_totals_by_type : {};
+
+    // Per-type lien pills come first so IRS/weed/brush are immediately
+    // visible at a glance.
+    const renderedTypes = new Set();
+    for (const [key, meta] of Object.entries(TYPE_FLAG_META)) {
+      const sub = Number(totalsByType[key]) || 0;
+      if (sub <= 0) continue;
+      renderedTypes.add(key);
+      const tip = `${meta.short} lien${sub === 0 ? "" : " " + fmtMoney(sub)}`;
       parts.push(
-        `<span class="flag flag-special" title="${escapeHtml(tip)}">SC${scCount > 1 ? ` ×${scCount}` : ""}</span>`
+        `<span class="flag ${meta.css}" title="${escapeHtml(tip)}">${escapeHtml(meta.short)} ${fmtMoney(sub)}</span>`
       );
     }
-    const lienTotal = Number(p.lien_total) || 0;
-    const lienCount = Array.isArray(p.liens) ? p.liens.length : 0;
-    if (lienTotal > 0 || lienCount > 0) {
-      const tip = lienCount
-        ? `${lienCount} lien${lienCount === 1 ? "" : "s"} totaling ${fmtMoney(lienTotal)}`
+    // Generic "Lien <total>" only if there's residual lien money not already
+    // covered by a per-type pill.
+    const typedTotal = [...renderedTypes].reduce((s, k) => s + (Number(totalsByType[k]) || 0), 0);
+    const residual = lienTotal - typedTotal;
+    if (residual > 0 || (lienTotal === 0 && liens.length > 0)) {
+      const tip = liens.length
+        ? `${liens.length} lien${liens.length === 1 ? "" : "s"} totaling ${fmtMoney(lienTotal)}`
         : fmtMoney(lienTotal);
       parts.push(
-        `<span class="flag flag-lien" title="${escapeHtml(tip)}">Lien ${fmtMoney(lienTotal)}</span>`
+        `<span class="flag flag-lien" title="${escapeHtml(tip)}">Lien ${fmtMoney(residual > 0 ? residual : lienTotal)}</span>`
+      );
+    }
+    const specials = Array.isArray(p.special_conditions) ? p.special_conditions : [];
+    const scTypes = Array.isArray(p.special_condition_types) ? p.special_condition_types : [];
+    if (specials.length > 0) {
+      const tip = specials.join("; ");
+      const sub = scTypes.length ? ` (${scTypes.slice(0, 3).map((t) => t.replace(/_/g, " ")).join(", ")}${scTypes.length > 3 ? "…" : ""})` : "";
+      parts.push(
+        `<span class="flag flag-special-cond" title="${escapeHtml(tip)}">SC${specials.length > 1 ? ` ×${specials.length}` : ""}${escapeHtml(sub)}</span>`
       );
     }
     return parts.join(" ");
@@ -293,11 +342,57 @@
 
   // ------ filters ----------------------------------------------------------
 
+  function propertyUseCodeKey(p) {
+    return (p.use_code || "").trim() || "—";
+  }
+
+  function propertyLienTypes(p) {
+    // Return the union of dollar-lien types and "sc:"-prefixed special
+    // condition types, so the single "Lien type" filter can gate on either
+    // source of flags without the caller having to know the split.
+    const set = new Set();
+    const liens = Array.isArray(p.liens) ? p.liens : [];
+    for (const l of liens) {
+      if (l && l.lien_type) set.add(l.lien_type);
+    }
+    const scTypes = Array.isArray(p.special_condition_types) ? p.special_condition_types : [];
+    for (const t of scTypes) if (t) set.add(`sc:${t}`);
+    return set;
+  }
+
+  function renderLienTypeChips() {
+    const container = document.getElementById("lien-type-filters");
+    if (!container) return;
+    container.innerHTML = "";
+    for (const t of state.lienTypes) {
+      const el = document.createElement("button");
+      el.type = "button";
+      el.className = "chip" + (state.activeLienTypes.has(t.key) ? " active" : "");
+      el.textContent = `${t.label} (${t.count})`;
+      el.addEventListener("click", () => {
+        if (state.activeLienTypes.has(t.key)) state.activeLienTypes.delete(t.key);
+        else state.activeLienTypes.add(t.key);
+        el.classList.toggle("active");
+        applyFilters();
+      });
+      container.appendChild(el);
+    }
+  }
+
   function applyFilters() {
     const q = state.query.trim().toLowerCase();
     const filtered = state.all.filter((p) => {
       if (state.activeCategories.size && !state.activeCategories.has(p.category || "Unknown")) return false;
       if (state.activeStatuses.size && !state.activeStatuses.has(effectiveStatus(p))) return false;
+      if (state.activeUseCodes.size && !state.activeUseCodes.has(propertyUseCodeKey(p))) return false;
+      if (state.activeLienTypes.size) {
+        const types = propertyLienTypes(p);
+        let hit = false;
+        for (const t of state.activeLienTypes) {
+          if (types.has(t)) { hit = true; break; }
+        }
+        if (!hit) return false;
+      }
       if (state.bidMin != null && (p.min_bid == null || p.min_bid < state.bidMin)) return false;
       if (state.bidMax != null && (p.min_bid == null || p.min_bid > state.bidMax)) return false;
       if (state.onlyMappable && (p.lat == null || p.lng == null)) return false;
@@ -335,10 +430,47 @@
     }
   }
 
+  // Use-code chips render "<code> — <desc>  (<count>)" and are filtered by a
+  // small search box so long lists (LA County exposes ~400 distinct codes)
+  // stay navigable. ``state.useCodes`` is an array of { code, desc, count }.
+  function renderUseCodeChips() {
+    const container = document.getElementById("use-code-filters");
+    if (!container) return;
+    container.innerHTML = "";
+    const q = state.useCodeQuery.trim().toLowerCase();
+    const visible = state.useCodes.filter((u) => {
+      if (!q) return true;
+      const hay = `${u.code} ${u.desc}`.toLowerCase();
+      return hay.includes(q);
+    });
+    for (const u of visible) {
+      const el = document.createElement("button");
+      el.type = "button";
+      el.className = "chip" + (state.activeUseCodes.has(u.code) ? " active" : "");
+      const label = u.desc ? `${u.code} · ${u.desc}` : u.code;
+      el.textContent = `${label} (${u.count})`;
+      el.title = u.desc ? `${u.code} — ${u.desc}` : u.code;
+      el.addEventListener("click", () => {
+        if (state.activeUseCodes.has(u.code)) state.activeUseCodes.delete(u.code);
+        else state.activeUseCodes.add(u.code);
+        el.classList.toggle("active");
+        applyFilters();
+      });
+      container.appendChild(el);
+    }
+  }
+
   document.getElementById("q").addEventListener("input", (e) => {
     state.query = e.target.value;
     applyFilters();
   });
+  const useCodeSearch = document.getElementById("use-code-search");
+  if (useCodeSearch) {
+    useCodeSearch.addEventListener("input", (e) => {
+      state.useCodeQuery = e.target.value;
+      renderUseCodeChips();
+    });
+  }
   document.getElementById("bid-min").addEventListener("input", (e) => {
     const v = e.target.value;
     state.bidMin = v === "" ? null : Number(v);
@@ -364,6 +496,9 @@
   document.getElementById("reset").addEventListener("click", () => {
     state.activeCategories.clear();
     state.activeStatuses.clear();
+    state.activeUseCodes.clear();
+    state.activeLienTypes.clear();
+    state.useCodeQuery = "";
     state.query = "";
     state.bidMin = null;
     state.bidMax = null;
@@ -376,8 +511,12 @@
     document.getElementById("only-mappable").checked = false;
     document.getElementById("only-liens").checked = false;
     document.getElementById("only-special").checked = false;
+    const ucs = document.getElementById("use-code-search");
+    if (ucs) ucs.value = "";
     renderChips("category-filters", state.categories, state.activeCategories);
     renderChips("status-filters", state.statuses, state.activeStatuses);
+    renderUseCodeChips();
+    renderLienTypeChips();
     applyFilters();
   });
 
@@ -427,14 +566,70 @@
 
       const cats = new Set();
       const statuses = new Set();
+      // Use-code map: code -> { desc, count }. We pick the most common desc
+      // per code, since the raw Assessor data occasionally spells the same
+      // code with slight variations.
+      const useCodeMap = new Map();
+      // lien_type key -> { label, count }. Special-condition types are added
+      // as synthetic entries prefixed with "sc:" so the "Lien type" filter
+      // can span both sources of flags in one list.
+      const lienTypeMap = new Map();
+      const addLienType = (key, label) => {
+        if (!key) return;
+        const entry = lienTypeMap.get(key) || { key, label: label || key, count: 0 };
+        entry.count += 1;
+        if (!entry.label && label) entry.label = label;
+        lienTypeMap.set(key, entry);
+      };
       for (const p of state.all) {
         cats.add(p.category || "Unknown");
         statuses.add(effectiveStatus(p));
+        const code = propertyUseCodeKey(p);
+        const entry = useCodeMap.get(code) || { code, desc: p.use_desc || "", count: 0 };
+        entry.count += 1;
+        if (!entry.desc && p.use_desc) entry.desc = p.use_desc;
+        useCodeMap.set(code, entry);
+
+        const liens = Array.isArray(p.liens) ? p.liens : [];
+        const seen = new Set();
+        for (const l of liens) {
+          if (!l || !l.lien_type || seen.has(l.lien_type)) continue;
+          seen.add(l.lien_type);
+          addLienType(l.lien_type, l.lien_type_label || l.lien_type);
+        }
+        const scTypes = Array.isArray(p.special_condition_types) ? p.special_condition_types : [];
+        const seenSc = new Set();
+        for (const t of scTypes) {
+          if (!t || seenSc.has(t)) continue;
+          seenSc.add(t);
+          addLienType(`sc:${t}`, `Special: ${t.replace(/_/g, " ")}`);
+        }
       }
       state.categories = [...cats].sort();
       state.statuses = [...statuses].sort();
+      state.useCodes = [...useCodeMap.values()].sort((a, b) => {
+        // Sort by count desc, then by code asc.
+        if (b.count !== a.count) return b.count - a.count;
+        return String(a.code).localeCompare(String(b.code), undefined, { numeric: true });
+      });
+      // Keep the curated lien-type order stable: most-important first, then
+      // by frequency. "IRS, weed abatement, brush clearance, special
+      // conditions" are the user-requested flags and float to the top.
+      const PRIORITY = { irs: 0, weed: 1, brush: 2, state_tax: 3 };
+      state.lienTypes = [...lienTypeMap.values()].sort((a, b) => {
+        const ap = PRIORITY[a.key] ?? 10;
+        const bp = PRIORITY[b.key] ?? 10;
+        if (ap !== bp) return ap - bp;
+        if (a.key.startsWith("sc:") !== b.key.startsWith("sc:")) {
+          return a.key.startsWith("sc:") ? 1 : -1; // liens before SC
+        }
+        if (b.count !== a.count) return b.count - a.count;
+        return a.label.localeCompare(b.label);
+      });
       renderChips("category-filters", state.categories, state.activeCategories);
       renderChips("status-filters", state.statuses, state.activeStatuses);
+      renderUseCodeChips();
+      renderLienTypeChips();
 
       // Default sort indicator
       document.querySelector('#tbl thead th[data-sort="min_bid"]').classList.add("sort-asc");

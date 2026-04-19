@@ -29,6 +29,34 @@ log = logging.getLogger(__name__)
 
 AIN_RE = re.compile(r"\b(\d{4})[-\s]?(\d{3})[-\s]?(\d{3})\b")
 
+# Map free-text section headers on the Special Conditions flyer to stable
+# short keys. This lets the UI filter by condition type even though the
+# TTC rewrites the human-readable labels year to year. Patterns are
+# declaration-order -- the first match wins -- so overlapping concepts list
+# the more specific phrase first.
+SPECIAL_CONDITION_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"brush\s+clearance", re.I),       "brush_clearance"),
+    (re.compile(r"weed\s+abatement", re.I),        "weed_abatement"),
+    (re.compile(r"mobile\s+home", re.I),           "mobile_home"),
+    (re.compile(r"cemetery|burial", re.I),         "cemetery"),
+    (re.compile(r"easement", re.I),                "easement"),
+    (re.compile(r"flood", re.I),                   "flood_zone"),
+    (re.compile(r"submerged|underwater", re.I),    "submerged"),
+    (re.compile(r"well\b", re.I),                  "water_well"),
+    (re.compile(r"access", re.I),                  "access_restricted"),
+    (re.compile(r"condominium|condo", re.I),       "condo"),
+    (re.compile(r"improvements?\s+not\s+conveyed", re.I), "improvements_not_conveyed"),
+)
+
+
+def classify_special_condition(section: str | None) -> str:
+    """Map a free-text flyer section header to a stable condition key."""
+    text = section or ""
+    for pattern, key in SPECIAL_CONDITION_RULES:
+        if pattern.search(text):
+            return key
+    return "other"
+
 # A "section header" is a short, mostly-alphabetic line without an AIN,
 # without dollar amounts, and without other long numeric strings. These
 # thresholds are permissive on purpose -- real headers like "MOBILE HOMES"

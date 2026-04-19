@@ -64,6 +64,33 @@ def _where_clauses(ain: str) -> tuple[str, ...]:
     )
 
 
+def _polygon_area_sqft(rings: list[list[list[float]]]) -> float | None:
+    """Approximate polygon area in square feet from a ring in WGS84 degrees.
+
+    Uses the shoelace formula on an equirectangular projection centered on
+    the polygon, converting degrees to feet with a latitude-aware scale. The
+    result is accurate to within ~1% at LA's latitude for typical parcel
+    sizes -- good enough to backfill a missing ``LandSqFt`` attribute.
+    """
+    import math
+
+    ring = rings[0]
+    if not ring or len(ring) < 3:
+        return None
+    lat_mean = sum(pt[1] for pt in ring) / len(ring)
+    # 1 degree of latitude ~= 364,000 ft; longitude varies with cos(lat).
+    ft_per_deg_lat = 364000.0
+    ft_per_deg_lng = 364000.0 * math.cos(math.radians(lat_mean))
+    acc = 0.0
+    n = len(ring)
+    for i in range(n):
+        x1, y1 = ring[i][0] * ft_per_deg_lng, ring[i][1] * ft_per_deg_lat
+        x2, y2 = ring[(i + 1) % n][0] * ft_per_deg_lng, ring[(i + 1) % n][1] * ft_per_deg_lat
+        acc += x1 * y2 - x2 * y1
+    area = abs(acc) / 2.0
+    return area if area >= 1 else None
+
+
 def _parse_arcgis_feature(feat: dict[str, Any]) -> dict[str, Any]:
     attrs = feat.get("attributes") or {}
     geom = feat.get("geometry") or {}
@@ -91,7 +118,7 @@ def _parse_arcgis_feature(feat: dict[str, Any]) -> dict[str, Any]:
                 return v
         return None
 
-    return {
+    result = {
         "source": "arcgis",
         "use_code": _pick(
             "UseCode", "USECODE", "UseType", "SpecificUseType", "GeneralUseType"
@@ -124,20 +151,26 @@ def _parse_arcgis_feature(feat: dict[str, Any]) -> dict[str, Any]:
         "units": _pick(
             "Units", "UNITS", "UnitsCount", "NumUnits", "NumberOfUnits"
         ),
-        # sqft_lot: LA County's parcel feature services store geometry in a
-        # projected CRS (CA State Plane Zone 5, units = US feet), so the
-        # server-computed ``Shape__Area`` attribute is lot area in square
-        # feet -- ideal when no dedicated LandSqFt column is exposed.
+        # sqft_lot: try every dedicated land-area column we've seen LA County
+        # expose across its various parcel layers. We intentionally do NOT
+        # fall back to ``Shape__Area`` -- when we request ``outSR=4326`` the
+        # server returns that value in decimal degrees squared, which would
+        # silently produce garbage numbers. If no dedicated field is present,
+        # ``_compute_lot_sqft_from_geometry`` backfills from the polygon.
         "sqft_lot": _pick(
             "LandSqFt", "LandSqft", "LAND_SQFT", "LotSqFt", "LotSqft",
-            "SQFT_LOT", "LandArea", "LandAreaSqFt", "LAND_AREA",
-            "ParcelAreaSqFt", "Shape__Area", "Shape_Area", "SHAPE_Area",
+            "SQFT_LOT", "SqFtLot", "LandArea", "LandAreaSqFt", "LAND_AREA",
+            "ParcelAreaSqFt", "ParcelSqFt", "Roll_LandSqFt", "Roll_LandSqft",
+            "NetSqFt", "GrossSqFt",
         ),
         # sqft_building: SQFTmain is the LA County Assessor canonical field
-        # for the main structure's square footage.
+        # for the main structure's square footage. Additional variants cover
+        # the older FeatureServer schema and the cached mirror.
         "sqft_building": _pick(
-            "SQFTmain", "SqFtMain", "SQFT_MAIN",
-            "Bldg1SqFt", "BLDG_SQFT", "SQFTBldg", "BuildingSqFt", "MainSqFt",
+            "SQFTmain", "SqFtMain", "SQFT_MAIN", "SQFT_Main",
+            "Bldg1SqFt", "BldgSqFt", "BLDG_SQFT", "SQFTBldg", "SQFTBuilding",
+            "BuildingSqFt", "Building_SqFt", "MainSqFt", "StructureSqFt",
+            "SFA", "ImpSqFt", "Improvement_SqFt",
         ),
         "assessed_land": _pick("Roll_LandValue", "LandValue", "LAND_VALUE"),
         "assessed_improvements": _pick(
@@ -158,6 +191,15 @@ def _parse_arcgis_feature(feat: dict[str, Any]) -> dict[str, Any]:
         "lat": lat,
         "lng": lng,
     }
+
+    # Geometry-derived fallback for lot sq ft. Only used when the attribute
+    # columns come back empty -- a real ``LandSqFt`` value is preferred.
+    if result["sqft_lot"] in (None, 0) and rings and rings[0]:
+        geom_sqft = _polygon_area_sqft(rings)
+        if geom_sqft:
+            result["sqft_lot"] = round(geom_sqft)
+
+    return result
 
 
 def _arcgis_query(session, url: str, where: str) -> dict[str, Any] | None:
@@ -211,24 +253,40 @@ _DESC_RE = re.compile(r"use\s*description[^:]*:\s*([^\n<]+)", re.I)
 # more-specific phrases come first so they win over generic words like
 # "delinquent". Values are normalized labels, not direct page strings, so
 # the UI has a small fixed vocabulary to switch on.
+#
+# The negated "no longer subject to the power to sell" rule must come before
+# the plain "subject to the power to sell" rule so a redeemed parcel doesn't
+# get matched as still-in-default.
 _TAX_STATUS_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\btax[-\s]?defaulted\b", re.I), "Tax Defaulted"),
-    (re.compile(r"\bsubject to (the )?power to sell\b", re.I), "Subject to Power to Sell"),
-    (re.compile(r"\bno longer subject to (the )?power to sell\b", re.I), "Redeemed"),
-    (re.compile(r"\b(has been )?redeemed\b", re.I), "Redeemed"),
+    (re.compile(r"\bno longer subject to (?:the )?power to sell\b", re.I), "Redeemed"),
+    (re.compile(r"\b(?:has been )?redeemed\b", re.I), "Redeemed"),
     (re.compile(r"\bpaid in full\b", re.I), "Paid in Full"),
-    (re.compile(r"\btaxes?\s+(?:are\s+)?current\b", re.I), "Current"),
+    (re.compile(r"\btax[-\s]?defaulted\b", re.I), "Tax Defaulted"),
+    (re.compile(r"\bin\s+(?:tax[-\s]?)?default\b", re.I), "Tax Defaulted"),
+    (re.compile(r"\bsubject to (?:the )?power to sell\b", re.I), "Subject to Power to Sell"),
+    (re.compile(r"\bprior[-\s]?year\s+(?:taxes?\s+)?(?:are\s+)?delinquent\b", re.I), "Delinquent"),
     (re.compile(r"\bdelinquent\b", re.I), "Delinquent"),
+    (re.compile(r"\btaxes?\s+(?:are\s+)?(?:paid\s+)?current\b", re.I), "Current"),
+    (re.compile(r"\bcurrent\s+(?:year\s+)?taxes?\s+paid\b", re.I), "Current"),
+    (re.compile(r"\bstatus\s*[:\-]\s*current\b", re.I), "Current"),
+    (re.compile(r"\bstatus\s*[:\-]\s*(?:tax[-\s]?)?defaulted\b", re.I), "Tax Defaulted"),
 )
 
 
 def _scrape_tax_status(session, ain: str) -> str | None:
     """Return a normalized tax-status label from the Assessor portal, or None.
 
-    The Assessor parcel detail page surfaces tax status as plain text. We
-    require the AIN to appear somewhere in the page body first -- a generic
-    error/landing page might still contain the word "defaulted" in boilerplate,
-    and we don't want to match on that.
+    Walks the Assessor parcel detail HTML with two strategies:
+
+    1. Targeted: look for any DOM node whose label text mentions "Tax"/"Status"
+       and read the value from the same section. The Assessor portal renders
+       status in a labelled field, not free-floating prose, so this catches
+       cases where the raw page text doesn't read like a sentence.
+    2. Sentence-level: scan the full page text against ``_TAX_STATUS_RULES``.
+
+    We require the AIN to appear in the page body first -- a generic error or
+    landing page may still contain boilerplate like "tax-defaulted properties"
+    that would otherwise match.
     """
     url = PARCEL_DETAIL_URL.format(ain=ain)
     try:
@@ -239,7 +297,8 @@ def _scrape_tax_status(session, ain: str) -> str | None:
     if not resp.ok or not resp.text:
         return None
 
-    text = BeautifulSoup(resp.text, "lxml").get_text(" ", strip=True)
+    soup = BeautifulSoup(resp.text, "lxml")
+    text = soup.get_text(" ", strip=True)
 
     ain_variants = (ain,) if len(ain) != 10 else (
         ain, f"{ain[:4]}-{ain[4:7]}-{ain[7:]}", f"{ain[:4]} {ain[4:7]} {ain[7:]}"
@@ -247,6 +306,26 @@ def _scrape_tax_status(session, ain: str) -> str | None:
     if not any(v in text for v in ain_variants):
         return None
 
+    # Strategy 1: labelled field. Walk nodes whose text is a "Tax Status"-ish
+    # label and read the adjacent value. The portal uses several layouts over
+    # time (dt/dd, th/td, label+div), so check the siblings and the parent's
+    # subsequent text.
+    label_pat = re.compile(r"tax\s*(?:bill\s*)?status|tax\s*default|payment\s*status", re.I)
+    for node in soup.find_all(string=label_pat):
+        parent = node.parent
+        if not parent:
+            continue
+        candidates: list[str] = []
+        for sib in parent.find_all_next(limit=4):
+            sib_text = sib.get_text(" ", strip=True)
+            if sib_text and sib_text.lower() != node.strip().lower():
+                candidates.append(sib_text)
+        for cand in candidates:
+            for pattern, label in _TAX_STATUS_RULES:
+                if pattern.search(cand):
+                    return label
+
+    # Strategy 2: whole-page sentence scan.
     for pattern, label in _TAX_STATUS_RULES:
         if pattern.search(text):
             return label
@@ -323,7 +402,7 @@ class AssessorEnricher:
 
     def lookup(self, ain: str) -> dict[str, Any] | None:
         # Structured data path: ArcGIS first, HTML fallback. Cached as a unit.
-        cached = self.cache.get(f"assessor_v2_{ain}")
+        cached = self.cache.get(f"assessor_v3_{ain}")
         if cached is not None and cached.get("source") != "none":
             result: dict[str, Any] | None = cached
         else:
@@ -334,7 +413,7 @@ class AssessorEnricher:
                 result = _html_lookup(self.session, ain)
             # Cache even the "nothing found" result so we don't hammer on
             # retry within a single run.
-            self.cache.set(f"assessor_v2_{ain}", result or {"source": "none"})
+            self.cache.set(f"assessor_v3_{ain}", result or {"source": "none"})
 
         # Tax status: always from the Assessor parcel page, separately cached
         # so it can be invalidated without dropping the structured data, and
@@ -348,7 +427,7 @@ class AssessorEnricher:
         return result or None
 
     def _lookup_tax_status(self, ain: str) -> str | None:
-        key = f"tax_status_v1_{ain}"
+        key = f"tax_status_v2_{ain}"
         cached = self.cache.get(key)
         if cached is not None:
             # Re-try a miss on the next run in case the portal was flaky,
