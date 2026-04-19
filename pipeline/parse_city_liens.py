@@ -36,6 +36,55 @@ log = logging.getLogger(__name__)
 
 AIN_RE = re.compile(r"\b(\d{4})[-\s]?(\d{3})[-\s]?(\d{3})\b")
 
+# Lien-type classification. The city liens PDF mixes many kinds of liens on
+# the same parcel (weed abatement, nuisance, demolition, IRS federal tax
+# liens, rent escrow, etc.); the TTC's Special Conditions flyer adds another
+# axis ("mobile homes", "easements", "submerged land"). The UI needs to tell
+# them apart so users can filter to just the categories that matter.
+#
+# Categories are narrow and labelled in a way that's stable across years:
+#   * "irs"          - federal tax lien (IRS)
+#   * "weed"         - weed abatement (LA Fire Dept / county vegetation mgmt)
+#   * "brush"        - brush clearance (distinct program from weed abatement)
+#   * "special"      - "special conditions" flagged by the TTC flyer (mobile
+#                      home, easement, flood zone, etc.) -- NOT a dollar lien
+#   * "state_tax"    - California state tax lien (FTB)
+#   * "demolition"   - structure demolition cost recovery
+#   * "nuisance"     - generic public-nuisance abatement
+#   * "utility"      - unpaid water/power arrears
+#   * "other"        - everything else / unrecognized
+#
+# Patterns are tried in declaration order; first hit wins, so more specific
+# phrases (e.g. "weed abatement") are listed before the more generic
+# ("abatement") catch-alls.
+LIEN_TYPE_RULES: tuple[tuple[re.Pattern[str], str, str], ...] = (
+    (re.compile(r"\b(?:irs|federal\s+tax\s+lien|internal\s+revenue)\b", re.I),
+     "irs", "IRS"),
+    (re.compile(r"\b(?:state\s+tax\s+lien|franchise\s+tax\s+board|\bftb\b)\b", re.I),
+     "state_tax", "State Tax"),
+    (re.compile(r"\bweed\s+abatement\b", re.I),
+     "weed", "Weed Abatement"),
+    (re.compile(r"\bbrush\s+clearance\b", re.I),
+     "brush", "Brush Clearance"),
+    (re.compile(r"\bdemolition\b", re.I),
+     "demolition", "Demolition"),
+    (re.compile(r"\b(?:nuisance|property\s+abatement|code\s+enforcement)\b", re.I),
+     "nuisance", "Nuisance"),
+    (re.compile(r"\b(?:dwp|water|sewer|utility|trash|refuse|sanitation)\b", re.I),
+     "utility", "Utility"),
+    (re.compile(r"\b(?:vacant\s+lot|lot\s+cleaning|rubbish|debris)\b", re.I),
+     "nuisance", "Nuisance"),
+)
+
+
+def classify_lien(desc: str | None) -> tuple[str, str]:
+    """Return ``(lien_type_key, lien_type_label)`` for a lien description."""
+    text = desc or ""
+    for pattern, key, label in LIEN_TYPE_RULES:
+        if pattern.search(text):
+            return key, label
+    return "other", "Other"
+
 # Strict money tokens: require a ``$`` and either cents or commas. Matches
 # ``$1,234.56``, ``$1,234``, ``$123.45`` -- rejects ``1234`` (could be a year
 # or case number) and ``1,234`` (ambiguous).
@@ -58,7 +107,7 @@ def _money_values(text: str) -> list[float]:
 def parse_city_liens(pdf_path: str | Path) -> dict[str, dict[str, Any]]:
     """Return ``{ain: {"liens": [{desc, amount}], "total": float}}``."""
     result: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"liens": [], "total": 0.0}
+        lambda: {"liens": [], "total": 0.0, "totals_by_type": {}}
     )
 
     with pdfplumber.open(str(pdf_path)) as pdf:
@@ -78,12 +127,17 @@ def parse_city_liens(pdf_path: str | Path) -> dict[str, dict[str, Any]]:
 
                 desc = AIN_RE.sub("", line)
                 desc = MONEY_RE.sub("", desc).strip(" .,-$").strip()
+                lien_type, lien_type_label = classify_lien(desc)
                 for amount in amounts:
                     result[current_ain]["liens"].append({
                         "desc": (desc[:140] or "Lien"),
                         "amount": amount,
+                        "lien_type": lien_type,
+                        "lien_type_label": lien_type_label,
                     })
                     result[current_ain]["total"] += amount
+                    type_totals = result[current_ain].setdefault("totals_by_type", {})
+                    type_totals[lien_type] = (type_totals.get(lien_type) or 0.0) + amount
 
     if not result:
         log.warning("city-liens parser found no AIN+$ matches in %s", pdf_path)

@@ -26,7 +26,10 @@ from .enrich_assessor import AssessorEnricher
 from .geocode import Geocoder
 from .parse_city_liens import parse_city_liens
 from .parse_pdf import parse_pdf_to_list
-from .parse_special_conditions import parse_special_conditions
+from .parse_special_conditions import (
+    classify_special_condition,
+    parse_special_conditions,
+)
 from .use_codes import categorize
 from ._http import RateLimiter
 
@@ -123,6 +126,11 @@ def build(
         liens_info = city_liens.get(ain) or {}
         liens = liens_info.get("liens") or []
         lien_total = liens_info.get("total") or 0.0
+        lien_totals_by_type = liens_info.get("totals_by_type") or {}
+        lien_types = sorted({l.get("lien_type") for l in liens if l.get("lien_type")})
+
+        raw_specials = special_conditions.get(ain, [])
+        special_types = sorted({classify_special_condition(s) for s in raw_specials})
 
         out.append({
             "item_no": row.get("item_no"),
@@ -149,9 +157,12 @@ def build(
             "last_sale_price": enriched.get("last_sale_price"),
             "tax_status": enriched.get("tax_status"),
             "default_status": default.get("status"),
-            "special_conditions": special_conditions.get(ain, []),
+            "special_conditions": raw_specials,
+            "special_condition_types": special_types,
             "liens": liens,
             "lien_total": lien_total,
+            "lien_types": lien_types,
+            "lien_totals_by_type": lien_totals_by_type,
             "lat": lat,
             "lng": lng,
             "assessor_url": f"https://portal.assessor.lacounty.gov/parceldetail/{ain}",

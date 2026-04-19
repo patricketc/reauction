@@ -131,6 +131,25 @@ aside h3 {
   gap: 6px;
 }
 
+/* Use-code chip list can be long; cap height and scroll the overflow. */
+.chips-scroll {
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.use-code-controls {
+  margin-bottom: 6px;
+}
+.use-code-controls input[type="search"] {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 12px;
+  background: #fff;
+}
+
 .chip {
   font-size: 12px;
   padding: 5px 9px;
@@ -298,6 +317,10 @@ main#main.view-list > #map { display: none; }
 }
 .flag-lien    { background: #fde5e5; color: var(--danger); }
 .flag-special { background: #fff0d6; color: var(--warn); }
+.flag-irs          { background: #fde5e5; color: var(--danger); }
+.flag-weed         { background: #e8f0d7; color: #3d6b15; }
+.flag-brush        { background: #fff0d6; color: var(--warn); }
+.flag-special-cond { background: #ecd9f7; color: #62348a; }
 
 /* Flag detail blocks inside map popups. */
 .popup-flags {
