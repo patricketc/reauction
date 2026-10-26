@@ -1,5 +1,5 @@
 {
-  "generated_at": 1791847826,
+  "generated_at": 1793041027,
   "properties": [
     {
       "item_no": "1",
@@ -1790,12 +1790,8 @@
       "last_sale_price": null,
       "tax_status": null,
       "default_status": "in_default",
-      "special_conditions": [
-        "Parcel Numbers."
-      ],
-      "special_condition_types": [
-        "other"
-      ],
+      "special_conditions": [],
+      "special_condition_types": [],
       "liens": [],
       "lien_total": 0.0,
       "lien_types": [],
@@ -1830,12 +1826,8 @@
       "last_sale_price": null,
       "tax_status": null,
       "default_status": "in_default",
-      "special_conditions": [
-        "Parcel Numbers."
-      ],
-      "special_condition_types": [
-        "other"
-      ],
+      "special_conditions": [],
+      "special_condition_types": [],
       "liens": [],
       "lien_total": 0.0,
       "lien_types": [],
@@ -1870,12 +1862,8 @@
       "last_sale_price": null,
       "tax_status": null,
       "default_status": "in_default",
-      "special_conditions": [
-        "Parcel Numbers."
-      ],
-      "special_condition_types": [
-        "other"
-      ],
+      "special_conditions": [],
+      "special_condition_types": [],
       "liens": [],
       "lien_total": 0.0,
       "lien_types": [],
@@ -1910,12 +1898,8 @@
       "last_sale_price": null,
       "tax_status": null,
       "default_status": "in_default",
-      "special_conditions": [
-        "Parcel Numbers."
-      ],
-      "special_condition_types": [
-        "other"
-      ],
+      "special_conditions": [],
+      "special_condition_types": [],
       "liens": [],
       "lien_total": 0.0,
       "lien_types": [],
@@ -1950,12 +1934,8 @@
       "last_sale_price": null,
       "tax_status": null,
       "default_status": "in_default",
-      "special_conditions": [
-        "Parcel Numbers."
-      ],
-      "special_condition_types": [
-        "other"
-      ],
+      "special_conditions": [],
+      "special_condition_types": [],
       "liens": [],
       "lien_total": 0.0,
       "lien_types": [],
@@ -4834,12 +4814,8 @@
       "last_sale_price": null,
       "tax_status": null,
       "default_status": "in_default",
-      "special_conditions": [
-        "Parcel Numbers."
-      ],
-      "special_condition_types": [
-        "other"
-      ],
+      "special_conditions": [],
+      "special_condition_types": [],
       "liens": [],
       "lien_total": 0.0,
       "lien_types": [],
@@ -4910,12 +4886,8 @@
       "last_sale_price": null,
       "tax_status": null,
       "default_status": "in_default",
-      "special_conditions": [
-        "Parcel Numbers."
-      ],
-      "special_condition_types": [
-        "other"
-      ],
+      "special_conditions": [],
+      "special_condition_types": [],
       "liens": [],
       "lien_total": 0.0,
       "lien_types": [],
@@ -4950,12 +4922,8 @@
       "last_sale_price": null,
       "tax_status": null,
       "default_status": "in_default",
-      "special_conditions": [
-        "Parcel Numbers."
-      ],
-      "special_condition_types": [
-        "other"
-      ],
+      "special_conditions": [],
+      "special_condition_types": [],
       "liens": [],
       "lien_total": 0.0,
       "lien_types": [],
@@ -43258,12 +43226,8 @@
       "last_sale_price": null,
       "tax_status": null,
       "default_status": "in_default",
-      "special_conditions": [
-        "Parcel Numbers."
-      ],
-      "special_condition_types": [
-        "other"
-      ],
+      "special_conditions": [],
+      "special_condition_types": [],
       "liens": [],
       "lien_total": 0.0,
       "lien_types": [],
@@ -43298,12 +43262,8 @@
       "last_sale_price": null,
       "tax_status": null,
       "default_status": "in_default",
-      "special_conditions": [
-        "Parcel Numbers."
-      ],
-      "special_condition_types": [
-        "other"
-      ],
+      "special_conditions": [],
+      "special_condition_types": [],
       "liens": [],
       "lien_total": 0.0,
       "lien_types": [],
@@ -77610,12 +77570,8 @@
       "last_sale_price": null,
       "tax_status": null,
       "default_status": "in_default",
-      "special_conditions": [
-        "Parcel Numbers."
-      ],
-      "special_condition_types": [
-        "other"
-      ],
+      "special_conditions": [],
+      "special_condition_types": [],
       "liens": [],
       "lien_total": 0.0,
       "lien_types": [],
